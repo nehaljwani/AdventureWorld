@@ -888,7 +888,7 @@ bool checkLanding(){
 		for(int j=0;j<4;j++){
 			if((currRoboPos[12]>=arena[4*i+1][4*j+1].myPos[0]-6) &&	(currRoboPos[12]<=arena[4*i+1][4*j+1].myPos[0]+6)
 				&&(currRoboPos[13]>=arena[4*i+1][4*j+1].myPos[1]-6) &&(currRoboPos[13]<=arena[4*i+1][4*j+1].myPos[1]+6)	
-				&& currRoboPos[14]>=arena[4*i+1][4*j+1].myPos[2]){
+				&& (currRoboPos[14]-arena[4*i+1][4*j+1].myPos[2]<=9.5 && currRoboPos[14]-arena[4*i+1][4*j+1].myPos[2]>=0)){
 				landingTile[0]=4*i+1;
 				landingTile[1]=4*j+1;
 				return true;
