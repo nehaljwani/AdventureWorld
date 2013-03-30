@@ -14,6 +14,8 @@
 #include "myObstacle.h"
 #include "myFireBall.h"
 #include "myBallThrower.h"
+#include "myPortal.h"
+#include "mySpring.h"
 #include "myObjConfig.h"
 #include "functions.h"
 
@@ -42,10 +44,12 @@ int main(int argc, char **argv) {
     glutCreateWindow("****Adventure World!****");  // Setup the window
     initRendering();
     SetUpLights();
+    placeTrembling();
 
-    for(int i=0;i<12;i++)
+    for(int i=0;i<14;i++)
 	    InitMesh(i);
-
+	
+    srand(time(NULL));
     // Register callbacks
     glutDisplayFunc(drawScene);
     glutIdleFunc(drawScene);
@@ -79,6 +83,7 @@ void drawScene() {
     drawMyRobo();
     drawMyBlocks();
     drawMyObstacles();
+    showText();
     glPopMatrix();
     glFlush();
     glutSwapBuffers();

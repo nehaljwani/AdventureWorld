@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <time.h>
 #include <fstream>
 #include "imageloader.h"
 
@@ -9,6 +10,7 @@
 #define STATIC 0
 #define OBSTACLE 1 
 #define FLY 2
+#define TREMBLING 3
 #define FRONT 1 
 #define BACK 2
 #define UP 3 
@@ -21,14 +23,15 @@
 #define HELICOPTER_CAM 3
 
 //Globals
-GLuint vbo[12];
-GLuint vinx[12];
+GLuint vbo[14];
+GLuint vinx[14];
 GLint viewPort[4];
 GLuint _textureId[16];
 bool printEnable=false;
 bool jumpMode=false;
 bool flyMode=false;
 bool canJump=true;
+bool springJump=true;
 bool canWalk=true;
 bool leftClick=false;
 bool storeCamera=false;
@@ -59,8 +62,15 @@ int viewAngle=180;
 float viewDist=0;
 float shiftSpeed=0.08f;
 int obstRotAngle=0;
+float springConstant=1.0;
+int trembleRotAngle=1.0;
+int trembleParity=1;
+int springParity=-1;
+int trembleTimeOut=0;
 int currView=THIRD_PERSON_VIEW;
 int Zfactor=0;
+char writeString[1000];
+time_t start = time(0);
 
 //Function Declarations
 bool checkHit();
@@ -70,8 +80,10 @@ float getCurrentZ();
 void drawOrigins(float);
 void DrawMesh(GLuint, GLuint, int);
 void translateMe(float, float, float, GLdouble *);
+void teleportMe();
 double getRelativeDist(GLfloat *, GLdouble *);
 bool checkObsPos(GLfloat*, int);
+void printCurrentMatrix();
 void rotateMe(float, float, float, float, GLdouble *);
 bool checkLanding();
 GLuint loadTexture(Image* ); 
@@ -183,6 +195,27 @@ void putCamera(int currView){
 	}
 }
 
+void teleportMe(){
+	int i=3;
+	int j=3;
+	while(!arena[i][j].visibility){
+		i=rand()%15;
+		j=rand()%15;
+	}
+	currRoboPos[12]=arena[i][j].myPos[0];
+	currRoboPos[13]=arena[i][j].myPos[1];
+}
+
+void placeTrembling(){
+	for (int i=0;i<15;i+=4){
+		for (int j=0;j<15;j+=4){
+			int m=i+rand()%2;
+			int n=j+(m+rand())%2;
+			arena[m][n].type=TREMBLING;
+		}
+	}
+}
+
 bool endJump(){
 	GLfloat newPos[3];
 	/* Check with obstacles */
@@ -198,20 +231,12 @@ bool endJump(){
 					}
 				}
 			}
-			else if((j%2) && !(i%2) && arena[i][j].visibility){
-				newPos[0]=arena[i][j].myPos[0];
-				newPos[1]=arena[i][j].myPos[1];
-				newPos[2]=arena[i][j].myPos[2]+6;
-				if( getRelativeDist(newPos,currRoboPos)<10) {
-						return true;
-				}
-			}
 		}
 	}
 	/* Check with static tiles */
 	for(int i=0;i<15;i++){
 		for(int j=0;j<15;j++){
-			if(arena[i][j].type==STATIC){
+			if(arena[i][j].type==STATIC || arena[i][j].type==TREMBLING){
 				if((currRoboPos[14]-arena[i][j].myPos[2]<=9.5) && getRelativeDist(arena[i][j].myPos,currRoboPos)<10) {
 					currRoboPos[14]=0;
 					return true;
@@ -245,14 +270,14 @@ void roboJump(){
 }
 
 void drawSkybox(){
-	glPushMatrix();
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glPushMatrix();
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glMatrixMode(GL_MODELVIEW);
-	glTranslatef(90.0f, 90.0f, 0.0f);
-	glRotatef(90,1,0,0);	
-	drawOrigins(10);
-	glEnable(GL_TEXTURE_2D);
+        glMatrixMode(GL_MODELVIEW);
+        glTranslatef(90.0f, 90.0f, 0.0f);
+        glRotatef(90,1,0,0);
+        drawOrigins(10);
+        glEnable(GL_TEXTURE_2D);
 
         //Bottom
         glBindTexture(GL_TEXTURE_2D, _textureId[0]);
@@ -271,8 +296,8 @@ void drawSkybox(){
 
         //Up
         glBindTexture(GL_TEXTURE_2D, _textureId[1]);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glColor3f(1.0f, 1.0f, 1.0f);
         glBegin(GL_QUADS);
 
@@ -292,14 +317,13 @@ void drawSkybox(){
         glBegin(GL_QUADS);
 
         glNormal3f(-1.0, 0.0f, 0.0f);
-        glTexCoord2f(0.0f, 0.0f);        glVertex3f(256, -256, 256);
-        glTexCoord2f(1.0f, 0.0f);        glVertex3f(256,- 256, -256);
-        glTexCoord2f(1.0f, 1.0f);        glVertex3f(256, 256, -256);
-        glTexCoord2f(0.0f, 1.0f);        glVertex3f(256, 256, 256);
-
+        glTexCoord2f(0.0f, 0.0f);        glVertex3f(256, -256, -256);
+        glTexCoord2f(1.0f, 0.0f);        glVertex3f(256,- 256, 256);
+        glTexCoord2f(1.0f, 1.0f);        glVertex3f(256, 256, 256);
+        glTexCoord2f(0.0f, 1.0f);        glVertex3f(256, 256,- 256);
         glEnd();
-	
-	 //Right
+
+         //Right
         glBindTexture(GL_TEXTURE_2D, _textureId[3]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -307,14 +331,12 @@ void drawSkybox(){
         glBegin(GL_QUADS);
 
         glNormal3f(0.0, 0.0f, -1.0f);
-        glTexCoord2f(0.0f, 0.0f);        glVertex3f(-256, -256, 256);
-        glTexCoord2f(1.0f, 0.0f);        glVertex3f(256, -256, 256);
-        glTexCoord2f(1.0f, 1.0f);        glVertex3f(256, 256, 256);
-        glTexCoord2f(0.0f, 1.0f);        glVertex3f(-256, 256, 256);
-
+        glTexCoord2f(0.0f, 0.0f);        glVertex3f(256, -256, 256);
+        glTexCoord2f(1.0f, 0.0f);        glVertex3f(-256, -256, 256);
+        glTexCoord2f(1.0f, 1.0f);        glVertex3f(-256, 256, 256);
+        glTexCoord2f(0.0f, 1.0f);        glVertex3f(256, 256, 256);
         glEnd();
-	
-	 //Back
+        //Back
         glBindTexture(GL_TEXTURE_2D, _textureId[5]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -322,14 +344,14 @@ void drawSkybox(){
         glBegin(GL_QUADS);
 
         glNormal3f(1.0, 0.0f, 0.0f);
-        glTexCoord2f(0.0f, 0.0f);        glVertex3f(-256, -256, -256);
-        glTexCoord2f(1.0f, 0.0f);        glVertex3f(-256, -256, 256);
-        glTexCoord2f(1.0f, 1.0f);        glVertex3f(-256, 256, 256);
-        glTexCoord2f(0.0f, 1.0f);        glVertex3f(-256, 256,- 256);
+        glTexCoord2f(0.0f, 0.0f);        glVertex3f(-256, -256, 256);
+        glTexCoord2f(1.0f, 0.0f);        glVertex3f(-256, -256,- 256);
+        glTexCoord2f(1.0f, 1.0f);        glVertex3f(-256, 256,- 256);
+        glTexCoord2f(0.0f, 1.0f);        glVertex3f(-256, 256, 256);
 
         glEnd();
 
-	//Left
+        //Left
         glBindTexture(GL_TEXTURE_2D, _textureId[2]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -337,32 +359,100 @@ void drawSkybox(){
         glBegin(GL_QUADS);
 
         glNormal3f(0.0, 0.0f, 1.0f);
-        glTexCoord2f(0.0f, 0.0f);        glVertex3f(256, -256, -256);
-        glTexCoord2f(1.0f, 0.0f);        glVertex3f(-256, -256, -256);
-        glTexCoord2f(1.0f, 1.0f);        glVertex3f(-256, 256, -256);
-        glTexCoord2f(0.0f, 1.0f);        glVertex3f(256, 256, -256);
+        glTexCoord2f(0.0f, 0.0f);        glVertex3f(-256, -256, -256);
+        glTexCoord2f(1.0f, 0.0f);        glVertex3f(256, -256, -256);
+        glTexCoord2f(1.0f, 1.0f);        glVertex3f(256, 256, -256);
+        glTexCoord2f(0.0f, 1.0f);        glVertex3f(-256, 256, -256);
 
         glEnd();
 
 
 
-	glPopMatrix();
-	glDisable (GL_TEXTURE_2D);
+        glPopMatrix();
+        glDisable (GL_TEXTURE_2D);
+}
+
+
+void colorSelect(int id){ 
+        switch(id){
+                case 0:
+                        glColor3ub( 100, 149, 237);      //Head part
+                        break;
+                case 1:
+                        //glColor3ub( 100, 149, 237);      //Head part
+                        glColor3ub( 73, 129, 206);      //Torso part
+                        break;
+                case 2:
+                        glColor3ub( 100, 149, 237);      //Hand part
+                        break;
+                case 3:
+                        glColor3ub( 100, 149, 237);      //Hand part
+                        break;
+                case 4:
+                        glColor3ub( 100, 149, 237);      //Leg part
+                        break;
+                case 5:
+                        glColor3ub( 100, 149, 237);      //Leg part
+                        break;
+                case 6:
+                        glColor3ub( 100, 149, 237);      //Leg part
+                        break;
+                case 7:
+                        glColor3ub( 100, 149, 237);      //Leg part
+                        break;
+                default :
+                        glColor3f(219,219,219);
+                        break;
+        }    
+}
+
+void spotLight(){
+       float white[] = {1,1, 1, 1};
+       GLfloat lightpos[] ={(GLfloat)currRoboPos[12],(GLfloat)currRoboPos[13],(GLfloat)(currRoboPos[14]+7.0),1.0};
+       glLightf(GL_LIGHT1, GL_SPOT_CUTOFF, 30.0);
+       GLfloat spot_direction[] = { 0,0,-1}; 
+       glLightf(GL_LIGHT1, GL_SPOT_EXPONENT, 5.0);
+       glLightfv(GL_LIGHT1, GL_SPOT_DIRECTION, spot_direction);
+       glLightfv(GL_LIGHT1, GL_POSITION, lightpos);
+       glLightfv(GL_LIGHT1, GL_DIFFUSE, white);
+       glEnable(GL_LIGHT1);
+ 
+}
+
+bool checkLandSpring(){
+	int i=int(currRoboPos[12])/12;
+	int j=int(currRoboPos[13])/12;
+	if(!((i+1)%4) && !((j+1)%4) && !arena[i][j].visibility){
+		if((currRoboPos[14]/12)>=-5.0 && (currRoboPos[14]/12)<=15.5){
+			return true;
+		}
+	}
+	return false;
 }
 
 void drawMyRobo(){
+	spotLight();
 	glPushMatrix();
 	glMultMatrixd(currRoboPos);
 	drawOrigins(5.0f);
 	glColor3f(1.0f, 1.0f, 1.0f);
 	glDisable (GL_TEXTURE_2D);
 	for(int i=0;i<8;i++){ 
+		colorSelect(i);
 		glPushMatrix();
 		glMultMatrixd(origins[i]);
 		DrawMesh(vbo[i], vinx[i], i); 
 		glPopMatrix();
 	}   
 	glPopMatrix();
+	if(!springJump && checkLandSpring()){
+		canWalk=true;
+		canJump=true;
+		jumpMode=true;
+		springJump=true;
+	}
+	else
+		springJump=false;
 	if(jumpMode)
 		roboJump();
 	if((flyMode && !jumpMode) || (!flyMode && jumpMode)){
@@ -389,21 +479,23 @@ void drawMyObstacles(){
 					glRotatef(obstRotAngle,0,0,1);
 					glScalef(3,3,3);
 					drawOrigins(4);
-					glColor3f(1,1,1);
+					glColor3ub(139,69,19);
 					DrawMesh(vbo[9], vinx[9], 9); 
 					glPopMatrix();
 				}
 			}
-			else if((j%2) && !(i%2) && arena[i][j].visibility){
+			if((((i==2 && (j==2||j==12))||(i==12 && (j==2||j==12)))||
+						(((i==6 && (j==6||j==8))||(i==8 && (j==6||j==8)) )))
+					&& arena[i][j].visibility){ /* Place the teleports */
 				float *blockPos=arena[i][j].getXYZ();
 				glPushMatrix();
-				glTranslatef(blockPos[0],blockPos[1],blockPos[2]);
+				glTranslatef(blockPos[0],blockPos[1],blockPos[2]+2/*Elevation*/);
 				glTranslatef(0,0,2.5);
 				glRotatef(obstRotAngle,0,0,1);
+				glRotatef(90,0,1,0);/*Rotate about Y*/
+				glColor3ub(72,118,255);
 				glScalef(3,3,3);
-				drawOrigins(4);
-				glColor3f(1,1,1);
-				DrawMesh(vbo[9], vinx[9], 9); 
+				DrawMesh(vbo[12], vinx[12], 12); 
 				glPopMatrix();
 			}
 			if(j==14 && (i==5||i==9)){
@@ -414,7 +506,7 @@ void drawMyObstacles(){
 				glRotatef(-90,0,0,1);
 				glScalef(3,3,3);
 				drawOrigins(4);
-				glColor3f(1.0f,1.0f,1.0f);
+				glColor3f(0.0f,0.0f,0.0f);
 				DrawMesh(vbo[10], vinx[10], 10);
 				glPopMatrix();
 				/* Draw the Ball */
@@ -423,10 +515,26 @@ void drawMyObstacles(){
 				glMultMatrixd(origins[11]);
 				glTranslatef(0,0,7.5);
 				drawOrigins(3);
-				glColor3f(1,1,1);
+				glColor3ub(255,36,0);
 				glScalef(1.41,1.41,1.41);
 				DrawMesh(vbo[11], vinx[11], 11);
 				glPopMatrix();
+			}
+			if(!((i+1)%4) && !((j+1)%4) && !arena[i][j].visibility){
+				float *blockPos=arena[i][j].getXYZ();
+				glPushMatrix();
+				glTranslatef(blockPos[0],blockPos[1],blockPos[2]+2/*Elevation*/);
+				glRotatef(obstRotAngle,0,0,1);
+				glColor3ub(37,5,23);
+				for(int k=5;k>=0;k--){
+					glPushMatrix();
+					glTranslatef(0,0,k*springConstant*springParity*0.5);
+					glScalef(6,6,0);
+					DrawMesh(vbo[13], vinx[13], 13); 
+					glPopMatrix();
+				}
+				glPopMatrix();
+
 			}
 		}
 	}
@@ -439,12 +547,31 @@ void drawMyBlocks(){
 	for(int i=0;i<15;i++){
 		for(int j=0;j<15;j++){
 			if(arena[i][j].visibility){
-				float *blockPos=arena[i][j].getXYZ();
+/*				if(currRoboPos[14]<=10.5 && currRoboPos[14] >=0 && 
+						arena[i][j].type==TREMBLING && int(currRoboPos[12]/12)==i && int(currRoboPos[13]/12)==j){
+					glRotatef(trembleRotAngle*trembleParity,1,0,0);
+					if (trembleParity > 0){
+						trembleRotAngle+=1;
+						if(trembleRotAngle>15){
+							trembleTimeOut++;
+							trembleParity*=-1;
+						}
+					}
+					else{
+						trembleRotAngle-=1;
+						if(trembleRotAngle<-15){
+							trembleTimeOut++;
+							trembleParity*=-1;
+						}
+					}
+				}
+*/				float *blockPos=arena[i][j].getXYZ();
 				glPushMatrix();
 				glTranslatef(blockPos[0],blockPos[1],blockPos[2]);
 				glScalef(3,3,1);
 				drawOrigins(4);
-				glColor3f(1,1,1);
+				glColor3f(1.0,1.0,1.0);
+
 				DrawMesh(vbo[8], vinx[8], 8); 
 				glPopMatrix();
 			}
@@ -625,6 +752,7 @@ void killRobo(){
 }
 
 void update(int value) {
+	/* Keep the blocks flying! */
 	for(int i=0;i<4;i++){
 		for(int j=0;j<4;j++){
 			updateBlockPos(1+4*i, 1+4*j);
@@ -646,6 +774,7 @@ void update(int value) {
 		currRoboPos[13]=arena[landingTile[0]][landingTile[1]].myPos[1];
 		currRoboPos[14]=arena[landingTile[0]][landingTile[1]].myPos[2]+9.5;
 	}
+	/* Kill the robo on getting hit */
 	if(roboAlive && checkHit()){
 		killRobo();	
 		roboAlive=false;
@@ -657,6 +786,17 @@ void update(int value) {
 	if(origins[11][13]<-174)
 		origins[11][13]=0;
 	obstRotAngle=(obstRotAngle+1)%360;
+
+	if (springParity > 0){
+		springConstant+=0.01;
+		if(springConstant>2)
+			springParity*=-1;
+	}
+	else {
+		springConstant-=0.01;
+		if(springConstant<0)
+			springParity*=-1;
+	}
 	glutTimerFunc(5, update, 0);
 }
 
@@ -669,25 +809,25 @@ void initRendering() {
     glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
     glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
-	Image* image0 = loadBMP("Images/Bottom1.1.bmp");
-	_textureId[0] = loadTexture(image0);
-	delete image0;
-	Image* image1 = loadBMP("Images/Up1.1.bmp");
-	_textureId[1] = loadTexture(image1);
-	delete image1;
-	Image* image2 = loadBMP("Images/Side1.1.bmp");
-	_textureId[2] = loadTexture(image2);
-	delete image2;
-	Image* image3 = loadBMP("Images/Side1.2.bmp");
-	_textureId[3] = loadTexture(image3);
-	delete image3;
-	Image* image4 = loadBMP("Images/Side1.3.bmp");
-	_textureId[4] = loadTexture(image4);
-	delete image4;
-	Image* image5 = loadBMP("Images/Side1.4.bmp");
-	_textureId[5] = loadTexture(image5);
-	delete image5;
-  /*  glEnable(GL_DEPTH_TEST);
+    Image* image0 = loadBMP("Images/Bottom2.1.bmp");
+    _textureId[0] = loadTexture(image0);
+    delete image0;
+    Image* image1 = loadBMP("Images/Up2.1.bmp");
+    _textureId[1] = loadTexture(image1);
+    delete image1;
+    Image* image2 = loadBMP("Images/Side2.4.bmp");
+    _textureId[2] = loadTexture(image2);
+    delete image2;
+    Image* image3 = loadBMP("Images/Side2.2.bmp");
+    _textureId[3] = loadTexture(image3);
+    delete image3;
+    Image* image4 = loadBMP("Images/Side2.1.bmp");
+    _textureId[4] = loadTexture(image4);
+    delete image4;
+    Image* image5 = loadBMP("Images/Side2.3.bmp");
+    _textureId[5] = loadTexture(image5);
+    delete image5;  
+/*  glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
     glEnable(GL_NORMALIZE);
@@ -697,7 +837,7 @@ void initRendering() {
 
 void SetUpLights() {
         float pos[] = {10, 10, 10, 0};
-        float ambient[] = {0.3, 0.3, 0.3, 1};
+        float ambient[] = {0.1, 0.1, 0.1, 1};
         float white[] = {1, 1, 1, 1};
 
         glEnable(GL_LIGHTING);
@@ -909,9 +1049,9 @@ bool checkIntersection(int relativePos){
 			}
 		}
 	}
-	/* Check with obstacles */
+	
 	for(int i=0;i<15;i++){
-		for(int j=0;j<15;j++){
+		for(int j=0;j<15;j++){	/* Check with obstacles */
 			if(i==0||i==6||i==8||i==10) {
 				if(j==2||j==4||j==10||j==12){
 					newPos[0]=arena[i][j].myPos[0];
@@ -920,11 +1060,16 @@ bool checkIntersection(int relativePos){
 					if(checkObsPos(newPos, relativePos) && getRelativeDist(newPos,currRoboPos)<10) return true;
 				}
 			}
-			else if((j%2) && !(i%2) && arena[i][j].visibility){
+					/* Check with teleports */
+			if(((i==2 && (j==2||j==12))||(i==12 && (j==2||j==12)))||
+						(((i==6 && (j==6||j==8))||(i==8 && (j==6||j==8)) ))){
 					newPos[0]=arena[i][j].myPos[0];
 					newPos[1]=arena[i][j].myPos[1];
 					newPos[2]=arena[i][j].myPos[2]+2.5;
-					if(checkObsPos(newPos, relativePos) && getRelativeDist(newPos,currRoboPos)<10) return true;
+					if(checkObsPos(newPos, relativePos) && getRelativeDist(newPos,currRoboPos)<10) {
+						teleportMe();
+						return true;
+					}
 			}
 		}
 	}
@@ -1185,6 +1330,46 @@ Image* loadBMP(const char* filename) {
         input.close();
         return new Image(pixels2.release(), width, height);
 }
+void setOrthographicProjection()
+{
+       int w = glutGet(GLUT_SCREEN_WIDTH);
+       int h = glutGet(GLUT_SCREEN_HEIGHT);
 
+       glMatrixMode(GL_PROJECTION);
+       glPushMatrix();
+       glLoadIdentity();
+       gluOrtho2D(0, w, 0, h);
+       glScalef(1, -1, 1);
+       glTranslatef(0, -h, 0);
+       glMatrixMode(GL_MODELVIEW);
+}
 
+void resetPerspectiveProjection()
+{
+       glMatrixMode(GL_PROJECTION);
+       glPopMatrix();
+       glMatrixMode(GL_MODELVIEW);
+}
 
+void renderBitmapString(float x, float y, void *font,char *string)
+{
+       char *c;
+       glRasterPos2f(x, y);
+       for (c=string; *c != '\0'; c++)
+       {
+               glutBitmapCharacter(font, *c);
+       }
+}
+void showText(void)
+{
+       double seconds_since_start = difftime( time(0), start);
+       glColor3f(1.0f,0.0f,0.0f);
+       setOrthographicProjection();
+       glPushMatrix();
+       glLoadIdentity();
+       sprintf(writeString,"Time Elapsed : %d secs",int(seconds_since_start));
+      renderBitmapString(100,100,GLUT_BITMAP_TIMES_ROMAN_24,(char *)"Arrow keys for camera");
+//       renderBitmapString(500,50,GLUT_BITMAP_TIMES_ROMAN_24,writeString);
+       glPopMatrix();
+       resetPerspectiveProjection();
+}
