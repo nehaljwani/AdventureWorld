@@ -36,6 +36,8 @@ bool canWalk=true;
 bool leftClick=false;
 bool storeCamera=false;
 bool roboAlive=true;
+bool trembleFall=false;
+bool darkMode=false;
 float jumpParabolicY=0.1f;
 int landingTile[3];
 float dragEX=0;
@@ -58,22 +60,24 @@ GLdouble centerY;
 GLdouble centerZ;
 float currTileX=1;
 float currTileY=1;
+float fireBallSpeed=1.0;
 int viewAngle=180;
 float viewDist=0;
 float shiftSpeed=0.08f;
 int obstRotAngle=0;
 float springConstant=1.0;
-int trembleRotAngle=1.0;
 int trembleParity=1;
 int springParity=-1;
-int trembleTimeOut=0;
+GLfloat fireBallPos[15][3];
 int currView=THIRD_PERSON_VIEW;
 int Zfactor=0;
 char writeString[1000];
 time_t start = time(0);
+double seconds_since_start;
 
 //Function Declarations
 bool checkHit();
+void roboFall();
 float getCurrentX();
 float getCurrentY();
 float getCurrentZ();
@@ -85,7 +89,9 @@ double getRelativeDist(GLfloat *, GLdouble *);
 bool checkObsPos(GLfloat*, int);
 void printCurrentMatrix();
 void rotateMe(float, float, float, float, GLdouble *);
+void printScore();
 bool checkLanding();
+int maxTrembleAngle=0;
 GLuint loadTexture(Image* ); 
 
 
@@ -97,6 +103,7 @@ class worldObject {
 		bool visibility;
 		int movePos[3];
 		float shiftPos;
+		int trembleRotAngle;
 		worldObject(){
 			myColor[0]=myColor[1]=myColor[2]=1;
 			myPos[0]=myPos[1]=myPos[2]=0;
@@ -104,6 +111,7 @@ class worldObject {
 			movePos[0]=movePos[1]=movePos[2]=0;
 			shiftPos=0.00f;
 			type=STATIC;
+			trembleRotAngle=0;
 		}
 		float *getXYZ(){
 			return myPos;
@@ -134,6 +142,9 @@ void initMyBlocks(){
 			if(((i+1)%4==0)||((j+1)%4==0))
 				arena[i][j].visibility=false;
 		}
+		fireBallPos[i][0]=(i*2+1)*6;
+		fireBallPos[i][1]=rand()%((14*2+1)*6);
+		fireBallPos[i][2]=-2.5;
 	}
 	for(int i=0;i<4;i++){
 		for(int j=0;j<4;j++){
@@ -409,7 +420,7 @@ void colorSelect(int id){
 void spotLight(){
        float white[] = {1,1, 1, 1};
        GLfloat lightpos[] ={(GLfloat)currRoboPos[12],(GLfloat)currRoboPos[13],(GLfloat)(currRoboPos[14]+7.0),1.0};
-       glLightf(GL_LIGHT1, GL_SPOT_CUTOFF, 30.0);
+       glLightf(GL_LIGHT1, GL_SPOT_CUTOFF, 45.0);
        GLfloat spot_direction[] = { 0,0,-1}; 
        glLightf(GL_LIGHT1, GL_SPOT_EXPONENT, 5.0);
        glLightfv(GL_LIGHT1, GL_SPOT_DIRECTION, spot_direction);
@@ -498,7 +509,7 @@ void drawMyObstacles(){
 				DrawMesh(vbo[12], vinx[12], 12); 
 				glPopMatrix();
 			}
-			if(j==14 && (i==5||i==9)){
+			if(j==14){
 				/* Draw the ballThrower */
 				float *blockPos=arena[i][j].getXYZ();
 				glPushMatrix();
@@ -511,21 +522,26 @@ void drawMyObstacles(){
 				glPopMatrix();
 				/* Draw the Ball */
 				glPushMatrix();
-				glTranslatef(blockPos[0],blockPos[1],blockPos[2]);
-				glMultMatrixd(origins[11]);
-				glTranslatef(0,0,7.5);
+				glTranslatef(fireBallPos[i][0],fireBallPos[i][1],fireBallPos[i][2]);
+				fireBallPos[i][1]-=0.2f*fireBallSpeed;
+				fireBallSpeed+=0.0001;
 				drawOrigins(3);
 				glColor3ub(255,36,0);
 				glScalef(1.41,1.41,1.41);
 				DrawMesh(vbo[11], vinx[11], 11);
+				if((rand()%10==0)){
+					glColor3ub(255,100,0);
+					glutSolidSphere(1.5, 20, 20);
+				}
 				glPopMatrix();
 			}
+			/* Draw the Springs */
 			if(!((i+1)%4) && !((j+1)%4) && !arena[i][j].visibility){
 				float *blockPos=arena[i][j].getXYZ();
 				glPushMatrix();
 				glTranslatef(blockPos[0],blockPos[1],blockPos[2]+2/*Elevation*/);
 				glRotatef(obstRotAngle,0,0,1);
-				glColor3ub(37,5,23);
+				glColor3ub(167,167,167);
 				for(int k=5;k>=0;k--){
 					glPushMatrix();
 					glTranslatef(0,0,k*springConstant*springParity*0.5);
@@ -547,31 +563,33 @@ void drawMyBlocks(){
 	for(int i=0;i<15;i++){
 		for(int j=0;j<15;j++){
 			if(arena[i][j].visibility){
-/*				if(currRoboPos[14]<=10.5 && currRoboPos[14] >=0 && 
-						arena[i][j].type==TREMBLING && int(currRoboPos[12]/12)==i && int(currRoboPos[13]/12)==j){
-					glRotatef(trembleRotAngle*trembleParity,1,0,0);
-					if (trembleParity > 0){
-						trembleRotAngle+=1;
-						if(trembleRotAngle>15){
-							trembleTimeOut++;
-							trembleParity*=-1;
-						}
-					}
-					else{
-						trembleRotAngle-=1;
-						if(trembleRotAngle<-15){
-							trembleTimeOut++;
-							trembleParity*=-1;
-						}
-					}
-				}
-*/				float *blockPos=arena[i][j].getXYZ();
+				float *blockPos=arena[i][j].getXYZ();
 				glPushMatrix();
 				glTranslatef(blockPos[0],blockPos[1],blockPos[2]);
 				glScalef(3,3,1);
 				drawOrigins(4);
 				glColor3f(1.0,1.0,1.0);
-
+				if(currRoboPos[14]<=10.5 && 
+						arena[i][j].type==TREMBLING && int(currRoboPos[12]/12)==i && int(currRoboPos[13]/12)==j){
+					glRotatef(arena[i][j].trembleRotAngle*trembleParity,1,0,0);
+					if (trembleParity > 0){
+						arena[i][j].trembleRotAngle+=3;
+						if(arena[i][j].trembleRotAngle>maxTrembleAngle){
+							trembleParity*=-1;
+						}
+					}
+					else{
+						arena[i][j].trembleRotAngle-=3;
+						if(arena[i][j].trembleRotAngle<-maxTrembleAngle){
+							trembleParity*=-1;
+							maxTrembleAngle+=5;
+						}
+					}
+					if(arena[i][j].trembleRotAngle>=50){
+						trembleFall=true;
+						maxTrembleAngle=0;
+					}
+				}
 				DrawMesh(vbo[8], vinx[8], 8); 
 				glPopMatrix();
 			}
@@ -749,6 +767,8 @@ void killRobo(){
 	translateMe(0,1,0,origins[5]); /*Left Thigh*/
 	translateMe(0,-1,0,origins[6]); /*Right Leg*/
 	translateMe(0,1,0,origins[7]);  /*Left Leg*/
+	canJump=false;
+	canWalk=false;
 }
 
 void update(int value) {
@@ -758,15 +778,21 @@ void update(int value) {
 			updateBlockPos(1+4*i, 1+4*j);
 		}
 	}
+	/* Rerun fireBalls */
+	for(int i=0;i<15;i++){
+		if(fireBallPos[i][1]<=0)
+			fireBallPos[i][1]=174;
+	}
+		
 	/*Check for holes*/
-	if(!flyMode && !jumpMode && ((!arena[int(currRoboPos[12])/12][int(currRoboPos[13])/12].visibility) ||  /* Is a hole */
+	if( trembleFall || (!flyMode && !jumpMode && ((!arena[int(currRoboPos[12])/12][int(currRoboPos[13])/12].visibility) ||  /* Is a hole */
 			(currRoboPos[12]<0||currRoboPos[12]>180) ||				   /* Out of range */	
 			(currRoboPos[13]<0||currRoboPos[13]>180) || 				   /* Out of range */
 			((int)arena[int(currRoboPos[12])/12][int(currRoboPos[13])/12].myPos[0]!=(2*(int(currRoboPos[12])/12)+1)*6 ||
 			 (int)arena[int(currRoboPos[12])/12][int(currRoboPos[13])/12].myPos[1]!=(2*(int(currRoboPos[13])/12)+1)*6 || 
 			 arena[int(currRoboPos[12])/12][int(currRoboPos[13])/12].myPos[2]!=-9.5 
-			 ))) {				  					   /* Block out of place */
-		roboFall();
+			)))) {				  					   /* Block out of place */
+			roboFall();
 	}
 	/*Move robo with flying tile*/
 	if(flyMode && !jumpMode){
@@ -782,9 +808,6 @@ void update(int value) {
 	if(!roboAlive){
                 viewAngle=(viewAngle+5)%360;
 	}
-	translateMe(0,-0.2,0,origins[11]);
-	if(origins[11][13]<-174)
-		origins[11][13]=0;
 	obstRotAngle=(obstRotAngle+1)%360;
 
 	if (springParity > 0){
@@ -836,19 +859,23 @@ void initRendering() {
 }
 
 void SetUpLights() {
-        float pos[] = {10, 10, 10, 0};
-        float ambient[] = {0.1, 0.1, 0.1, 1};
-        float white[] = {1, 1, 1, 1};
+	glEnable(GL_LIGHTING);
+	float pos[] = {10, 10, 10, 0};
+	float ambient[] = {0.1, 0.1, 0.1, 1};
+	float white[] = {1, 1, 1, 1};
 
-        glEnable(GL_LIGHTING);
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
-        glEnable(GL_COLOR_MATERIAL);
-        glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
+	glEnable(GL_COLOR_MATERIAL);
+	glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
 
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
-        glLightfv(GL_LIGHT0, GL_POSITION, pos);
+	glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
+	glLightfv(GL_LIGHT0, GL_POSITION, pos);
 
-        glEnable(GL_LIGHT0);
+	glEnable(GL_LIGHT0);
+	if(darkMode){
+		ambient[0]=ambient[1]=ambient[2]=0;
+		glDisable(GL_LIGHT0);
+	}
+	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
 }
 #define BUFFER_OFFSET(x)((char *)NULL+(x))
 
@@ -914,7 +941,9 @@ void handleKeypress1(unsigned char key, int x, int y) {
 	int w = glutGet(GLUT_SCREEN_WIDTH);
 	int h = glutGet(GLUT_SCREEN_HEIGHT);
 	switch(key){
-                case 27: exit(0); break;
+                case 27: printScore(); exit(0);break;
+                case 'q': printScore(); exit(0);break;
+                case 'm': darkMode=!darkMode; break;
                 case 54: viewAngle=(viewAngle+15)%360; break;
                 case 52: viewAngle=(viewAngle-15)%360; break;
                 case 56: Zfactor+=5; break;
@@ -1077,14 +1106,9 @@ bool checkIntersection(int relativePos){
 }
 	
 bool checkHit(){
-	/* Check with fireBall */
-	GLfloat newPos[3];
-	newPos[1]=-origins[11][13];
-	newPos[0]=(2*5+1)*6;
-	newPos[2]=0;
-	if(getRelativeDist(newPos, currRoboPos)<10) return true;
-	newPos[0]=(2*9+1)*6;
-	if(getRelativeDist(newPos, currRoboPos)<10) return true;
+	for(int i=0; i<15; i++){
+		if(getRelativeDist(fireBallPos[i], currRoboPos)<5) return true;
+	}
 	return false;
 }
 
@@ -1360,16 +1384,26 @@ void renderBitmapString(float x, float y, void *font,char *string)
                glutBitmapCharacter(font, *c);
        }
 }
+void printScore(){
+	for(int i=0; i<10; i++)
+		printf("*");
+	printf("\nYour Score Is: %lf\n", seconds_since_start);
+	for(int i=0; i<10; i++)
+		printf("*");
+	printf("\n");
+}
 void showText(void)
 {
-       double seconds_since_start = difftime( time(0), start);
-       glColor3f(1.0f,0.0f,0.0f);
-       setOrthographicProjection();
-       glPushMatrix();
-       glLoadIdentity();
-       sprintf(writeString,"Time Elapsed : %d secs",int(seconds_since_start));
-      renderBitmapString(100,100,GLUT_BITMAP_TIMES_ROMAN_24,(char *)"Arrow keys for camera");
-//       renderBitmapString(500,50,GLUT_BITMAP_TIMES_ROMAN_24,writeString);
-       glPopMatrix();
-       resetPerspectiveProjection();
+	if(roboAlive){
+		seconds_since_start = difftime( time(0), start);
+		glColor3f(1.0f,0.0f,0.0f);
+		setOrthographicProjection();
+		glPushMatrix();
+		glLoadIdentity();
+		sprintf(writeString,"Time Elapsed : %d secs",int(seconds_since_start));
+		renderBitmapString(100,100,GLUT_BITMAP_TIMES_ROMAN_24,(char *)"Arrow keys for camera");
+		//       renderBitmapString(500,50,GLUT_BITMAP_TIMES_ROMAN_24,writeString);
+		glPopMatrix();
+		resetPerspectiveProjection();
+	}
 }

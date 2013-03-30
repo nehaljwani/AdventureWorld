@@ -43,7 +43,6 @@ int main(int argc, char **argv) {
 
     glutCreateWindow("****Adventure World!****");  // Setup the window
     initRendering();
-    SetUpLights();
     placeTrembling();
 
     for(int i=0;i<14;i++)
@@ -68,6 +67,7 @@ int main(int argc, char **argv) {
 // Function to draw objects on the screen
 void drawScene() {
 //    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    SetUpLights();
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glPushMatrix();
