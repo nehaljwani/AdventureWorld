@@ -1,3 +1,4 @@
+<pre>
 						AdventureWorld
 						==============
 
@@ -49,3 +50,4 @@ freeglut, freeglut-devel
 To run the game	:
 Make
 ./Adventure
+</pre>
